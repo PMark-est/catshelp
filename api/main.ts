@@ -8,6 +8,13 @@ import { google } from "googleapis";
 import { join } from "https://deno.land/std/path/mod.ts";
 import fs from "node:fs";
 import db from "../models/index.cjs";
+import process from "node:process";
+import {
+  uploadToDrive,
+  createDriveFolder,
+  downloadMediaFile,
+} from "./google/drive.ts";
+import { appendToSheet, getSheet } from "./google/sheets.ts";
 
 // Seda ei tohi eemaldada
 // Mingi fucked magic toimub siin, et peab vähemalt
@@ -22,21 +29,6 @@ app.use(express.json());
 // Get the equivalent of __dirname
 const __filename = new URL(import.meta.url).pathname;
 const __dirname = __filename.substring(0, __filename.lastIndexOf("/")); // Get the directory path
-
-const auth = new google.auth.GoogleAuth({
-  keyFile: "credentials.json",
-  scopes: "https://www.googleapis.com/auth/drive",
-  clientOptions: {
-    subject: "markopeedosk@catshelp.ee",
-  },
-});
-
-const client = await auth.getClient();
-
-const drive = google.drive({
-  version: "v3",
-  auth: client,
-});
 
 app.use("/public", express.static(join(__dirname, "public")));
 
@@ -122,26 +114,8 @@ app.get("/api/verify", (req: any, res: any) => {
 // 1. query paramina hooldekodu nime kaudu otsimine
 // 2. meelespea tabel
 app.get("/api/animals/dashboard", async (req, res) => {
-  const auth = new google.auth.GoogleAuth({
-    keyFile: "credentials.json",
-    scopes: "https://www.googleapis.com/auth/spreadsheets",
-  });
-
-  const client = await auth.getClient();
-
-  const sheets = google.sheets({
-    version: "v4",
-    auth: client,
-  });
-
   const SHEETS_ID = process.env.CATS_SHEETS_ID;
-
-  const rows = await sheets.spreadsheets.get({
-    auth: auth,
-    spreadsheetId: SHEETS_ID,
-    ranges: ["HOIUKODUDES"],
-    includeGridData: true,
-  });
+  const rows = await getSheet(SHEETS_ID, ["HOIUKODUDES"]);
 
   const random = rows.data.sheets![0].data;
   const columnNamesWithIndexes: { [key: string]: number } = {};
@@ -206,14 +180,7 @@ app.get("/api/animals/dashboard", async (req, res) => {
             )![0];
 
           //TODO: kontrolli kas fail on juba kaustas olemas
-          const file = await drive.files.get(
-            {
-              supportsAllDrives: true,
-              fileId: imageID,
-              alt: "media",
-            },
-            { responseType: "stream" }
-          );
+          const file = await downloadMediaFile(imageID);
 
           const destination = fs.createWriteStream(
             `./public/Cats/${fosterhomeCats["pets"]["name"]}.png`
@@ -241,18 +208,6 @@ app.post("/api/animals", async (req: any, res: any) => {
   const formData: CatFormData = req.body;
   const rescueDate = formData.leidmis_kp;
 
-  const auth = new google.auth.GoogleAuth({
-    keyFile: "credentials.json",
-    scopes: "https://www.googleapis.com/auth/spreadsheets",
-  });
-
-  const client = await auth.getClient();
-
-  const sheets = google.sheets({
-    version: "v4",
-    auth: client,
-  });
-
   const SHEETS_ID = process.env.CATS_SHEETS_ID;
 
   const animal = await db.Animal.create();
@@ -260,15 +215,8 @@ app.post("/api/animals", async (req: any, res: any) => {
   delete formData.pildid;
   const a = { id: animal.id, ...formData };
 
-  await sheets.spreadsheets.values.append({
-    auth: auth,
-    spreadsheetId: SHEETS_ID,
-    range: "HOIUKODUDES",
-    valueInputOption: "RAW",
-    resource: {
-      values: [Object.values(a)],
-    },
-  });
+  const values = [Object.values(a)];
+  await appendToSheet(SHEETS_ID, "HOIUKODUDES", values);
 
   const animalRescue = await db.AnimalRescue.create({
     rescue_date: rescueDate,

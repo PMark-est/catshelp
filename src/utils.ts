@@ -231,8 +231,8 @@ export const submitNewCatProfile = async (
     formData
   );
   if (formData.nimi === "") {
-    //uploadImages(pictures, catID.data.id.toString());
+    uploadImages(pictures, catID.data.id.toString());
   } else {
-    //uploadImages(pictures, formData.nimi as string);
+    uploadImages(pictures, formData.nimi as string);
   }
 };
